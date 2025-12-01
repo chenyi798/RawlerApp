@@ -3,22 +3,22 @@ name: Build Data Crawler App
 on:
   push:
     branches: [main]
-    tags: ['v*']  # 只有推送标签时触发
-  workflow_dispatch:  # 允许手动触发
+    tags: ['v*']
+  workflow_dispatch:
 
 jobs:
   build-macos:
     runs-on: macos-latest
     strategy:
       matrix:
-        python-version: [3.12.1]
+        python-version: [3.11]  # 使用稳定的 3.11
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -35,35 +35,27 @@ jobs:
           --add-data "eastmoney_crawler.py:." \
           --add-data "pbc_crawler.py:." \
           --hidden-import=curl_cffi \
-          --hidden-import=requests \
-          --hidden-import=bs4 \
-          --hidden-import=docx \
-          --hidden-import=PIL \
-          --hidden-import=tkinter \
-          --hidden-import=urllib.parse \
-          --hidden-import=json \
           --collect-all curl_cffi \
           crawler_gui.py
     
     - name: Upload macOS Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: 数据采集助手-macOS
         path: dist/数据采集助手.app
-        retention-days: 30
 
   build-windows:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: [3.9]
+        python-version: [3.11]
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -80,19 +72,11 @@ jobs:
           --add-data "eastmoney_crawler.py;." `
           --add-data "pbc_crawler.py;." `
           --hidden-import=curl_cffi `
-          --hidden-import=requests `
-          --hidden-import=bs4 `
-          --hidden-import=docx `
-          --hidden-import=PIL `
-          --hidden-import=tkinter `
-          --hidden-import=urllib.parse `
-          --hidden-import=json `
           --collect-all curl_cffi `
           crawler_gui.py
     
     - name: Upload Windows Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: 数据采集助手-Windows
         path: dist/数据采集助手.exe
-        retention-days: 30
