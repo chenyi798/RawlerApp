@@ -2,6 +2,7 @@ name: Build Data Crawler App
 
 on:
   push:
+    branches: [main]
     tags: ['v*']  # 只有推送标签时触发
   workflow_dispatch:  # 允许手动触发
 
