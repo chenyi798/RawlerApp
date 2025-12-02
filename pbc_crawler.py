@@ -20,7 +20,7 @@ class PBCCrawler:
             'max_delay': 4,
             'max_retries': 3,
             'timeout': 30,
-            'max_pages': 5  # 限制最大页数
+            'max_pages': 10000000  # 限制最大页数
         }
     
     def log(self, message, level="INFO"):
@@ -260,16 +260,16 @@ class PBCCrawler:
             self.log(f"提取内容时出错: {e}", "WARNING")
             return {'html': '', 'text': ''}
 
-    def download_image_with_retry(self, img_src, base_url=None, max_retries=2, timeout=10):
+    def download_file_with_retry(self, file_url, base_url=None, max_retries=2, timeout=10):
         """
-        下载图片，支持重试机制
+        下载文件，支持重试机制
         """
         if not self.is_crawling:
             return None
             
         # 如果是相对路径，组合成完整URL
-        if base_url and not img_src.startswith(('http://', 'https://')):
-            img_src = urljoin(base_url, img_src)
+        if base_url and not file_url.startswith(('http://', 'https://')):
+            file_url = urljoin(base_url, file_url)
         
         for attempt in range(max_retries + 1):
             if not self.is_crawling:
@@ -281,15 +281,15 @@ class PBCCrawler:
                     'Referer': base_url or 'http://www.pbc.gov.cn/'
                 }
                 
-                response = requests.get(img_src, headers=headers, timeout=timeout)
+                response = requests.get(file_url, headers=headers, timeout=timeout)
                 if response.status_code == 200:
                     return response.content
                 else:
-                    self.log(f"图片下载失败，状态码：{response.status_code}，URL：{img_src}", "WARNING")
+                    self.log(f"文件下载失败，状态码：{response.status_code}，URL：{file_url}", "WARNING")
             except requests.exceptions.Timeout:
-                self.log(f"图片下载超时（尝试 {attempt+1}/{max_retries+1}），URL：{img_src}", "WARNING")
+                self.log(f"文件下载超时（尝试 {attempt+1}/{max_retries+1}），URL：{file_url}", "WARNING")
             except requests.exceptions.RequestException as e:
-                self.log(f"图片下载错误（尝试 {attempt+1}/{max_retries+1}）：{e}，URL：{img_src}", "WARNING")
+                self.log(f"文件下载错误（尝试 {attempt+1}/{max_retries+1}）：{e}，URL：{file_url}", "WARNING")
             
             # 如果不是最后一次尝试，等待一段时间后重试
             if attempt < max_retries:
@@ -378,7 +378,7 @@ class PBCCrawler:
                     if img_src:
                         self.log(f"正在下载第 {i}/{total_images} 张图片: {img_src}")
                         # 使用文章基础URL作为图片下载的基础URL
-                        image_content = self.download_image_with_retry(img_src, article_base_url, max_retries=2, timeout=10)
+                        image_content = self.download_file_with_retry(img_src, article_base_url, max_retries=2, timeout=10)
                         
                         if image_content:
                             try:
@@ -430,9 +430,113 @@ class PBCCrawler:
             self.log(f"保存文档时出错: {e}", "ERROR")
             return False
 
+    def download_excel_files(self, html_content, article_url, output_folder, title):
+        """
+        从HTML内容中提取并下载Excel文件
+        """
+        if not self.is_crawling:
+            return 0
+            
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            article_base_url = self.get_article_base_url(article_url)
+            
+            # 查找所有链接，筛选出Excel文件
+            excel_extensions = ['.xls', '.xlsx', '.csv']
+            all_links = soup.find_all('a', href=True)
+            
+            excel_links = []
+            for link in all_links:
+                href = link.get('href', '').lower()
+                text = link.get_text(strip=True)
+                
+                # 检查链接是否指向Excel文件
+                for ext in excel_extensions:
+                    if ext in href or text.endswith(ext):
+                        excel_links.append({
+                            'url': link.get('href'),
+                            'text': text if text else '未命名文件'
+                        })
+                        break
+            
+            if not excel_links:
+                self.log("未发现Excel文件")
+                return 0
+            
+            self.log(f"发现 {len(excel_links)} 个Excel文件链接")
+            
+            # 创建Excel文件夹
+            excel_folder = os.path.join(output_folder, "excel_files")
+            if not os.path.exists(excel_folder):
+                os.makedirs(excel_folder)
+            
+            # 下载每个Excel文件
+            downloaded_count = 0
+            for i, excel_link in enumerate(excel_links, 1):
+                if not self.is_crawling:
+                    break
+                    
+                excel_url = excel_link['url']
+                excel_text = excel_link['text']
+                
+                self.log(f"正在下载第 {i}/{len(excel_links)} 个Excel文件: {excel_text}")
+                
+                # 下载文件
+                file_content = self.download_file_with_retry(excel_url, article_base_url, max_retries=2, timeout=15)
+                
+                if file_content:
+                    # 确定文件扩展名
+                    file_ext = '.xls'
+                    for ext in excel_extensions:
+                        if ext in excel_url.lower():
+                            file_ext = ext
+                            break
+                    
+                    # 清理文件名
+                    safe_excel_text = self.clean_filename(excel_text, max_length=50)
+                    if safe_excel_text == '未命名文件':
+                        safe_excel_text = f"{self.clean_filename(title, max_length=30)}_附件{i}"
+                    
+                    # 确保文件名以扩展名结尾
+                    if not safe_excel_text.endswith(file_ext):
+                        safe_excel_text += file_ext
+                    
+                    # 保存文件
+                    excel_filename = os.path.join(excel_folder, safe_excel_text)
+                    
+                    # 处理文件名冲突
+                    counter = 1
+                    original_name = excel_filename
+                    while os.path.exists(excel_filename):
+                        name_part, ext_part = os.path.splitext(original_name)
+                        excel_filename = f"{name_part}_{counter}{ext_part}"
+                        counter += 1
+                    
+                    try:
+                        with open(excel_filename, 'wb') as f:
+                            f.write(file_content)
+                        
+                        self.log(f"Excel文件已保存: {excel_filename}")
+                        downloaded_count += 1
+                        
+                        # 添加延迟，避免请求过快
+                        if i < len(excel_links):
+                            time.sleep(1)
+                    except Exception as e:
+                        self.log(f"保存Excel文件失败: {e}", "WARNING")
+                else:
+                    self.log(f"下载Excel文件失败: {excel_url}", "WARNING")
+            
+            self.log(f"成功下载 {downloaded_count}/{len(excel_links)} 个Excel文件")
+            return downloaded_count
+            
+        except Exception as e:
+            self.log(f"下载Excel文件时出错: {e}", "WARNING")
+            return 0
+
     def process_single_url(self, url, output_folder="documents"):
         """
-        处理单个URL：获取内容并保存为Word文档
+        处理单个URL：获取内容并保存为Word文档和Excel文件
         """
         if not self.is_crawling:
             return False
@@ -487,10 +591,13 @@ class PBCCrawler:
                 }
             
             # 传递文章URL给save_html_to_doc函数，用于构建图片URL
-            success = self.save_html_to_doc(page_content['html'], doc_filename, url)
+            doc_success = self.save_html_to_doc(page_content['html'], doc_filename, url)
             
-            if success:
-                self.log(f"成功处理: {title}")
+            # 下载Excel文件
+            excel_count = self.download_excel_files(content, url, output_folder, title)
+            
+            if doc_success:
+                self.log(f"成功处理: {title} (下载了 {excel_count} 个Excel文件)")
                 return True
             else:
                 self.log(f"处理失败: {title}", "WARNING")
@@ -621,6 +728,7 @@ class PBCCrawler:
         if self.is_crawling:
             self.log(f"处理完成: 成功 {success_count}/{len(all_links_data)} 个链接", "SUCCESS")
             self.log(f"文档保存在: {output_folder} 文件夹中")
+            self.log(f"Excel文件保存在: {os.path.join(output_folder, 'excel_files')} 文件夹中")
             return success_count > 0
         else:
             self.log(f"爬取已停止: 已完成 {success_count} 个链接", "WARNING")
